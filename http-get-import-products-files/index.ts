@@ -3,6 +3,7 @@ import {
   StorageSharedKeyCredential,
   generateBlobSASQueryParameters,
   BlobSASPermissions,
+  SASProtocol,
 } from '@azure/storage-blob';
 
 const httpTrigger: AzureFunction = async function (
@@ -56,9 +57,13 @@ function generateBlobSasToken(
 
   const permissions = BlobSASPermissions.parse(permissionChar);
 
-  const startsOn = new Date();
-  const expiresOn = new Date();
-  expiresOn.setMinutes(startsOn.getMinutes() + 15);
+  const now = new Date();
+  const startsOn = new Date(now.toISOString());
+  const expiresOn = new Date(startsOn);
+  expiresOn.setMinutes(startsOn.getUTCMinutes() + 10080);
+
+  console.log('Vivek logs container', containerName);
+  console.log('Vivek logs blobname', blobName);
 
   const sasToken = generateBlobSASQueryParameters(
     {
@@ -67,6 +72,8 @@ function generateBlobSasToken(
       permissions,
       startsOn,
       expiresOn,
+      protocol: SASProtocol.Https, // REQUIRED
+      version: '2025-05-05', // Match this with the 'sv' in your final URL
     },
     sharedKeyCredential
   ).toString();
