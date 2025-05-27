@@ -29,7 +29,7 @@ const httpTrigger: AzureFunction = async function (
     accountKey,
     containerName,
     name,
-    'cw' // 'c' = create, 'w' = write
+    'cw'
   );
 
   const blobUrl = `https://${accountName}.blob.core.windows.net/${containerName}/${name}?${sasToken}`;
@@ -72,8 +72,8 @@ function generateBlobSasToken(
       permissions,
       startsOn,
       expiresOn,
-      protocol: SASProtocol.Https, // REQUIRED
-      version: '2025-05-05', // Match this with the 'sv' in your final URL
+      protocol: SASProtocol.Https,
+      version: '2025-05-05',
     },
     sharedKeyCredential
   ).toString();
