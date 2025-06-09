@@ -1,61 +1,45 @@
-import { AzureFunction, Context } from '@azure/functions';
-import {
-  BlobServiceClient,
-  StorageSharedKeyCredential,
-  ContainerClient,
-} from '@azure/storage-blob';
-import * as csvParser from 'csv-parser';
-import { Readable } from 'stream';
+const { BlobServiceClient } = require('@azure/storage-blob');
+const { ServiceBusClient } = require('@azure/service-bus');
+const csvParser = require('csv-parser');
+const stream = require('stream');
 
-const blobTrigger: AzureFunction = async function (
-  context: Context,
-  myBlob: Buffer
-): Promise<void> {
-  const blobName = context.bindingData.name as string;
-  const storageConnectionString = process.env.AzureWebJobsStorage;
+const connectionString = process.env.ServiceBusConnection;
+const queueName = 'products_service_servicebus_queue';
 
-  if (!storageConnectionString) {
-    context.log.error('Missing AzureWebJobsStorage setting.');
-    return;
-  }
+module.exports = async function (context, blobTrigger) {
+  const csvContent = blobTrigger.toString();
+  const results = [];
 
-  const blobServiceClient = BlobServiceClient.fromConnectionString(
-    storageConnectionString
-  );
-  const uploadedContainer = blobServiceClient.getContainerClient('uploaded');
-  const parsedContainer = blobServiceClient.getContainerClient('parsed');
+  const sbClient = new ServiceBusClient(connectionString);
+  const sender = sbClient.createSender(queueName);
 
-  // Ensure target container exists
-  await parsedContainer.createIfNotExists();
+  const readableStream = new stream.Readable();
+  readableStream.push(csvContent);
+  readableStream.push(null);
 
-  // Parse CSV
-  const records = await parseCsv(myBlob);
-  records.forEach((record, i) => context.log(`Record ${i + 1}:`, record));
-
-  // Copy to parsed/
-  const sourceBlobClient = uploadedContainer.getBlobClient(blobName);
-  const targetBlobClient = parsedContainer.getBlobClient(blobName);
-
-  const copyPoller = await targetBlobClient.beginCopyFromURL(
-    sourceBlobClient.url
-  );
-  await copyPoller.pollUntilDone();
-  context.log(`Copied blob to 'parsed/${blobName}'`);
-
-  // Delete original blob
-  await sourceBlobClient.delete();
-  context.log(`Deleted blob from 'uploaded/${blobName}'`);
-};
-
-function parseCsv(buffer: Buffer): Promise<any[]> {
-  return new Promise((resolve, reject) => {
-    const records: any[] = [];
-    Readable.from(buffer)
+  await new Promise((resolve, reject) => {
+    readableStream
       .pipe(csvParser())
-      .on('data', (data) => records.push(data))
-      .on('end', () => resolve(records))
-      .on('error', (err) => reject(err));
+      .on('data', (data) => results.push(data))
+      .on('end', resolve)
+      .on('error', reject);
   });
-}
 
-export default blobTrigger;
+  console.log('Results', results);
+  // Send messages to Service Bus Queue
+  try {
+    for (const record of results) {
+      await sender.sendMessages({ body: record });
+      console.log('Sent Record', record);
+    }
+    context.log(`Pushed ${results.length} products to Service Bus queue`);
+    console.log(`Pushed ${results.length} products to Service Bus queue`);
+  } catch (error) {
+    context.log.error('Failed to send message(s) to Service Bus:', error);
+    console.log('Failed to send message(s) to Service Bus:', error);
+    throw error;
+  } finally {
+    await sender.close();
+    await sbClient.close();
+  }
+};
